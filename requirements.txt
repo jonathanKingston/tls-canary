@@ -1,4 +1,5 @@
 coloredlogs
+cryptography
 ipython
 nose >= 1.3
 mock

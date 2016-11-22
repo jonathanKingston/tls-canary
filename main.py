@@ -20,7 +20,7 @@ import time
 import cleanup
 import firefox_downloader as fd
 import firefox_extractor as fe
-import firefox_runner as fr
+import xpcshell_worker as fr
 import progress_bar
 import url_store as us
 
@@ -168,7 +168,7 @@ def build_data_logs(test_app, base_app, data_dir):
 
     logger.info("Building build metadata logs")
 
-    cmd = [test_app.exe, "-xpcshell", os.path.join(data_dir, "js", "build_data.js")]
+    cmd = [test_app.exe, "-xpcshell", "-a", test_app.browser, os.path.join(data_dir, "js", "build_data.js")]
     logger.debug("Executing shell command `%s`" % ' '.join(cmd))
     result = subprocess.check_output(cmd, cwd=data_dir, stderr=subprocess.STDOUT)
     logger.debug("Command returned %s" % result.strip().replace('\n', ' '))
@@ -178,7 +178,7 @@ def build_data_logs(test_app, base_app, data_dir):
         logger.error("Building test build data log failed")
         raise error
 
-    cmd = [base_app.exe, "-xpcshell", os.path.join(data_dir, "js", "build_data.js")]
+    cmd = [base_app.exe, "-xpcshell", "-a", base_app.browser, os.path.join(data_dir, "js", "build_data.js")]
     logger.debug("Executing shell command `%s`" % ' '.join(cmd))
     result = subprocess.check_output(cmd, cwd=data_dir, stderr=subprocess.STDOUT)
     logger.debug("Command returned %s" % result.strip().replace('\n', ' '))
@@ -212,7 +212,7 @@ def run_test(app, url_list, work_dir, module_dir, num_workers, info=False, cert_
     try:
         while True:
             # Spawn new workers if necessary
-            runner.maintain_worker_queue()
+            runner.maintain_worker_pool()
 
             # Check result queue
             while True:
