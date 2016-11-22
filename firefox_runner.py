@@ -11,14 +11,14 @@ from threading import Thread
 import time
 
 logger = logging.getLogger(__name__)
+module_dir = os.path.split(__file__)[0]
 
-
-def read_from_worker(worker, queue):
+def read_from_worker(worker, response_queue):
     global logger
     logger.debug('Reader thread started for worker %s' % worker)
     for line in iter(worker.stdout.readline, b''):
         try:
-            queue.put(json.loads(line))
+            response_queue.put(json.loads(line))
         except ValueError:
             # FIXME: XPCshell is currently issuing many warnings, constant warning is too verbose
             # logger.warning("Unexpected script output: %s" % line.strip())
@@ -26,61 +26,72 @@ def read_from_worker(worker, queue):
     logger.debug('Reader thread finished for worker %s' % worker)
     worker.stdout.close()
 
+def worker_manager(app, response_queue):
+    global logger
+    logger.debug('Manager thread started for app %s' % app)
 
-class FirefoxRunner(object):
-    def __init__(self, exe_file, work_list, work_dir, data_dir, num_workers=10, info=False, cert_dir=None):
-        self.__exe_file = exe_file
-        self.__work_list = Queue(maxsize=len(work_list))
+
+class FirefoxWorker(object):
+    def __init__(self, app, work_list):
+        self.__app = app
+        self.__work_list_total = len(work_list)
+        self.__work_queue = Queue(maxsize=self.__work_list_total)
         for row in work_list:
-            self.__work_list.put(row)
-        self.__work_dir = work_dir  # usually ~/.tlscanary
-        self.__data_dir = data_dir  # usually module directory
-        self.__num_workers = num_workers
-        self.workers = []
-        self.results = Queue(maxsize=len(work_list))
-        self.__info = info
-        self.__cert_dir = cert_dir
+            self.__work_queue.put(row)
+        self.__urls_pending = 0
+        self.__wakeup_pending = None
+        self.__worker_thread = None
+        self.__reader_thread = None
+        self.__result_queue = Queue(maxsize=len(work_list))
 
-    def maintain_worker_queue(self):
-        for worker in self.workers:
-            ret = worker.poll()
-            if ret is not None:
-                logger.debug('Worker terminated with return code %d' % ret)
-                self.workers.remove(worker)
+    def spawn(self):
+        """Spawn the worker process and its dedicated reader thread"""
+        global module_dir
 
-        while len(self.workers) < self.__num_workers:
-            if self.__work_list.empty():
-                return 0
-            rank, url = self.__work_list.get()
-            rank_url = "%d,%s" % (rank, url)
-            cmd = [self.__exe_file,
-                   '-xpcshell',
-                   os.path.join(self.__data_dir, "js", "scan_url.js"),
-                   '-u=%s' % rank_url,
-                   '-d=%s' % self.__data_dir]
-            if self.__info:
-                cmd.append("-j=true")
-            if self.__cert_dir is not None:
-                cmd.append("-c=%s" % self.__cert_dir)
-            logger.debug("Executing shell command `%s`" % ' '.join(cmd))
-            worker = subprocess.Popen(
-                cmd,
-                cwd=self.__data_dir,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                bufsize=1)  # `1` means line-buffered
-            self.workers.append(worker)
-            # Spawn a reader thread, because stdio reads are blocking
-            reader = Thread(target=read_from_worker, name="Reader_"+rank_url, args=(worker, self.results))
-            reader.daemon = True  # Thread dies with worker
-            reader.start()
-            logger.debug('Spawned worker, now %d in queue' % len(self.workers))
+        self.__urls_pending = 0
+        cmd = [self.__app.exe, '-xpcshell', "-a", self.__app.browser,
+               os.path.join(module_dir, "js", "scan_worker.js")]
+        logger.debug("Executing worker shell command `%s`" % ' '.join(cmd))
+        self.__worker_thread = subprocess.Popen(
+            cmd,
+            cwd=self.__app.browser,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=1)  # `1` means line-buffered
 
-        return self.__work_list.qsize()
+        # Spawn a reader thread, because stdio reads are blocking
+        self.__reader_thread = Thread(target=read_from_worker, name="Reader",
+                                      args=(self.__worker_thread, self.__result_queue))
+        self.__reader_thread.daemon = True  # Thread dies with worker
+        self.__reader_thread.start()
+
+    def send(self, msg):
+        """Sends a JSON-formatted message to the worker"""
+        self.__worker_thread.write(json.dumps(msg))
+
+    def terminate(self):
+        """Signals worker process to quit"""
+        # The reader tread dies when the Firefox process quits
+        self.send({"mode": "quit"})
+
+    def wakeup(self):
+        """Call this every few ms to keep the worker handling events (long story)"""
+        if not self.__is_wakeup_pending():
+            self.send({"mode": "wakeup"})
+
+    def __scan_url(self, rank, url):
+        msg = {"mode": "scan", "url": url, "rank": rank}
+        self.send(msg)
+        self.__urls_pending += 1
+
+    def maintain_queue(self, parallel=100):
+        while self.__urls_pending < parallel and not self.__work_queue.empty():
+            self.__send_url(self.__work_queue.get)
+        results = []
 
     def is_done(self):
-        return len(self.workers) == 0 and self.__work_list.empty()
+        return self.__work_queue.empty()
 
     def get_result(self):
         """Read from result queue. Returns None if empty."""
@@ -100,19 +111,3 @@ class FirefoxRunner(object):
             if len(self.workers) == 0:
                 break
             time.sleep(0.05)
-
-    def terminate_workers(self):
-        # Signal workers to terminate
-        for worker in self.workers:
-            worker.terminate()
-        # Wait for 5 seconds for workers to finish
-        self.__wait_for_remaining_workers(5)
-
-        # Kill remaining workers
-        for worker in self.workers:
-            worker.kill()  # Same as .terminate() on Windows
-        # Wait for 5 seconds for workers to finish
-        self.__wait_for_remaining_workers(5)
-
-        if len(self.workers) != 0:
-            logger.warning('There are %d non-terminating workers remaining' % len(self.workers))
