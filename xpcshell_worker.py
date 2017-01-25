@@ -44,7 +44,7 @@ class XPCShellWorker(object):
 
     def spawn(self):
         """Spawn the worker process and its dedicated reader thread"""
-        global module_dir
+        global logger, module_dir
 
         cmd = [self.__app.exe, '-xpcshell', "-a", self.__app.browser, self.__script]
         logger.debug("Executing worker shell command `%s`" % ' '.join(cmd))

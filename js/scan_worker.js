@@ -8,9 +8,9 @@ const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
 const DEFAULT_TIMEOUT = 10000;
 
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/NetUtil.jsm");
+//Cu.import("resource://gre/modules/Services.jsm");
+//Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+//Cu.import("resource://gre/modules/NetUtil.jsm");
 
 
 // // Register resource://app/ URI
@@ -44,19 +44,19 @@ Cu.import("resource://gre/modules/NetUtil.jsm");
 // Cu.import("resource://devtools/client/framework/gDevTools.jsm");
 
 
-Components.utils.import("resource://gre/modules/AppConstants.jsm");
-
-function set_prefs() {
-    Services.prefs.setBoolPref("services.blocklist.signing.enforced", false);
-}
-
-print(Services.prefs.getBoolPref("services.blocklist.signing.enforced"));
-set_prefs();
-print(Services.prefs.getBoolPref("services.blocklist.signing.enforced"));
-use_profile("/tmp/test_profile2");
-print(Services.prefs.getBoolPref("services.blocklist.signing.enforced"));
-set_prefs();
-print(Services.prefs.getBoolPref("services.blocklist.signing.enforced"));
+// Components.utils.import("resource://gre/modules/AppConstants.jsm");
+//
+// function set_prefs() {
+//     Services.prefs.setBoolPref("services.blocklist.signing.enforced", false);
+// }
+//
+// print(Services.prefs.getBoolPref("services.blocklist.signing.enforced"));
+// set_prefs();
+// print(Services.prefs.getBoolPref("services.blocklist.signing.enforced"));
+// use_profile("/tmp/test_profile2");
+// print(Services.prefs.getBoolPref("services.blocklist.signing.enforced"));
+// set_prefs();
+// print(Services.prefs.getBoolPref("services.blocklist.signing.enforced"));
 
 
 // function create_profile(rootPath, profileName) {
@@ -202,7 +202,7 @@ function scan_url(url) {
 
         print("in scan_url promise: " + JSON.stringify(req));
 
-        var req = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"].createInstance(Ci.nsIXMLHttpRequest);
+        let req = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"].createInstance(Ci.nsIXMLHttpRequest);
         try {
             req.open("HEAD", "https://" + url, true);
             req.timeout = DEFAULT_TIMEOUT;
@@ -219,33 +219,55 @@ function scan_url(url) {
     });
 }
 
-// Requires firefox -xpcshell -a /Applications/FirefoxNightly.app/Contents/Resources/browser/
-// Else
-var report_result = function _report_result(id, result, request, error) {
-    // print("in report_result: " + JSON.stringify(request));
-    print(JSON.stringify({"id": id, "result": result, "request": request, "error": error}));
-};
+function get_runtime_info() {
+//    Cu.import("resource://gre/modules/Services.jsm");
+//    Cu.import("resource://gre/modules/FileUtils.jsm");
+//    Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+//    Cu.import("resource://gre/modules/NetUtil.jsm");
+    Cu.import("resource://gre/modules/AppConstants.jsm");
+
+    let nssInfo = Cc["@mozilla.org/security/nssversion;1"].getService(Ci.nsINSSVersion);
+
+    return {
+        nssVersion: "NSS " + nssInfo.NSS_Version,
+        nsprVersion: "NSPR " + nssInfo.NSPR_Version,
+        branch: AppConstants.MOZ_UPDATE_CHANNEL,
+        appVersion: AppConstants.MOZ_APP_VERSION_DISPLAY
+    };
+}
+
+function report_result(id, result, request, error) {
+    print(JSON.stringify({
+        "id": id,
+        "result": result,
+        "request": request,
+        "error": error
+    }));
+}
 
 function handle_command(cmd) {
     switch (cmd.mode) {
+        case "info":
+            report_result(cmd.id, get_runtime_info(), null, null);
+            break;
         case "useprofile":
             use_profile(cmd.path);
-            report_result(cmd.id, "OK", null, false);
+            report_result(cmd.id, "OK", null, null);
             break;
         case "updateprofile":
             set_prefs();
             update_profile();
-            report_result(cmd.id, "OK", null, false);
+            report_result(cmd.id, "OK", null, null);
             break;
         case "scan":
             scan_url(cmd.url).then(result => {
                 // print("in promise resolve");
                 // print(result);
-                report_result(cmd.id, result.result, result.request, false)
+                report_result(cmd.id, result.result, result.request, null)
             }, result => {
                 // print("in promise reject");
                 // print(result);
-                report_result(cmd.id, result.error, result.request, true)
+                report_result(cmd.id, result.error, result.request, null)
             });
             break;
         case "quit":
@@ -253,7 +275,7 @@ function handle_command(cmd) {
         // Fall-through
         case "wakeup":
             while (mainThread.hasPendingEvents()) mainThread.processNextEvent(true);
-            report_result(cmd.id, "OK", null, false);
+            report_result(cmd.id, "OK", null, null);
             break;
         default:
             throw "Unknown command: " + cmd.mode;
@@ -266,11 +288,11 @@ function handle_command(cmd) {
 //     mainThread.processNextEvent(true);
 // }
 while (!gScriptDone) {
-    let cmd;
+    let cmd = null;
     try {
-        let cmd = JSON.parse(readline());
+        cmd = JSON.parse(readline());
         handle_command(cmd);
     } catch (e) {
-        report_result(null, null, String(e));
+        report_result(cmd.id, null, null, e);
     }
 }
