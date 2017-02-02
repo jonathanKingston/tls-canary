@@ -15,14 +15,22 @@ module_dir = os.path.split(__file__)[0]
 
 def read_from_worker(worker, response_queue):
     global logger
+
     logger.debug('Reader thread started for worker %s' % worker)
     for line in iter(worker.stdout.readline, b''):
+        line = line.strip()
         try:
-            response_queue.put(json.loads(line))
+            response_queue.put(Response(line))
+            logger.debug("Received worker result: %s" % line)
         except ValueError:
             # FIXME: XPCshell is currently issuing many warnings, constant warning is too verbose
             # logger.warning("Unexpected script output: %s" % line.strip())
-            logger.debug("JS error in worker %s: %s" % (worker, line.strip()))
+            if line.startswith("JavaScript error:"):
+                logger.error("JS error from worker %s: %s" % (worker, line))
+            elif line.startswith("JavaScript warning:"):
+                logger.warning("JS warning from worker %s: %s" % (worker, line))
+            else:
+                logger.critical("Invalid output from worker %s: %s" % (worker, line))
     logger.debug('Reader thread finished for worker %s' % worker)
     worker.stdout.close()
 
@@ -72,12 +80,22 @@ class XPCShellWorker(object):
         self.__worker_thread.kill()
 
     def is_running(self):
-        """Check whether the worker process is still running"""
-        return self.__worker_thread is None or self.__worker_thread.poll() is None
+        """Check whether the worker is still fully running"""
+        if self.__worker_thread is None:
+            return False
+        return self.__worker_thread.poll() is None
 
-    def send(self, msg):
-        """Send a message to the worker"""
-        self.__worker_thread.write(json.dumps(msg))
+    def send(self, cmd):
+        """Send a command message to the worker"""
+        global logger
+
+        cmd_string = str(cmd)
+        logger.debug("Sending worker message: `%s`" % cmd_string)
+        try:
+            self.__worker_thread.stdin.write(cmd_string + "\n")
+            self.__worker_thread.stdin.flush()
+        except IOError:
+            logger.error("Can't write to worker. Message `%s` wasn't heard." % cmd_string)
 
     def receive(self):
         """Read queued messages from worker. Returns [] if there were none."""
@@ -85,11 +103,43 @@ class XPCShellWorker(object):
         global logger
 
         # Read everything from the reader queue
-        results = []
+        responses = []
         try:
             while True:
-                results += self.results.get_nowait()
+                responses.append(self.__response_queue.get_nowait())
         except Empty:
             pass
 
-        return results
+        return responses
+
+
+class Command(object):
+
+    def __init__(self, id, mode, **kwargs):
+        if mode is None:
+            raise Exception("Refusing to init mode-less command")
+        self.__id = id
+        self.__mode = mode
+        self.__args = kwargs
+
+    def __str__(self):
+        return json.dumps({"id": self.__id, "mode": self.__mode, "args": self.__args})
+
+
+class Response(object):
+
+    def __init__(self, message_string):
+        global logger
+
+        self.id = None
+        self.success = None
+        self.result = None
+        response = json.loads(message_string)  # May throw ValueError
+        if "id" in response:
+            self.id = response["id"]
+        if "success" in response:
+            self.success = response["success"]
+        if "response" in response:
+            self.result = response["response"]
+        if len(response) > 3:
+            logger.error("Worker response has unexpected format: %s" % message_string)

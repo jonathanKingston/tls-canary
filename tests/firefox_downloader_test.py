@@ -5,36 +5,16 @@
 import mock
 from nose.tools import *
 import os
-import shutil
-import tempfile
 from time import sleep
 
 import firefox_downloader as fd
+import tests
 
 
-test_dir = os.path.split(__file__)[0]
-tmp_dir = None
-
-
-def test_setup():
-    """set up test fixtures"""
-    global tmp_dir
-    tmp_dir = tempfile.mkdtemp(prefix="tlscanarytest_")
-
-
-def test_teardown():
-    """tear down test fixtures"""
-    global tmp_dir
-    if tmp_dir is not None:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        tmp_dir = None
-
-
-@with_setup(test_setup, test_teardown)
 def test_firefox_downloader_instance():
     """FirefoxDownloader instances sanity check"""
-    global tmp_dir
-    fdl = fd.FirefoxDownloader(tmp_dir)
+
+    fdl = fd.FirefoxDownloader(tests.tmp_dir)
 
     build_list, platform_list, test_default, base_default = fdl.list()
     assert_true("nightly" in build_list and "release" in build_list, "build list looks sane")
@@ -42,11 +22,10 @@ def test_firefox_downloader_instance():
     assert_true(test_default in build_list and base_default in build_list, "defaults are valid builds")
 
 
-@with_setup(test_setup, test_teardown)
 def test_firefox_downloader_exceptions():
     """Test handling of invalid parameters"""
-    global tmp_dir
-    fdl = fd.FirefoxDownloader(tmp_dir, cache_timeout=1)
+
+    fdl = fd.FirefoxDownloader(tests.tmp_dir, cache_timeout=1)
     build_list, platform_list, test_default, base_default = fdl.list()
 
     assert_true("foobar" not in build_list and "foobar" not in platform_list)
@@ -54,13 +33,12 @@ def test_firefox_downloader_exceptions():
     assert_raises(Exception, fdl.download, test_default, "foobar")
 
 
-@with_setup(test_setup, test_teardown)
 @mock.patch('urllib2.urlopen')
 @mock.patch('sys.stdout')  # to silence progress bar
 def test_firefox_downloader_downloading(mock_stdout, mock_urlopen):
     """Test the download function"""
-    global tmp_dir
-    fdl = fd.FirefoxDownloader(tmp_dir, cache_timeout=1)
+
+    fdl = fd.FirefoxDownloader(tests.tmp_dir, cache_timeout=1)
 
     mock_req = mock.Mock()
     mock_read = mock.Mock(side_effect=("foo", "bar", None))
@@ -78,7 +56,7 @@ def test_firefox_downloader_downloading(mock_stdout, mock_urlopen):
     assert_true(mock_urlopen.call_args_list == [((expected_url,),)], "downloads the expected URL")
     assert_equal(len(mock_read.call_args_list), 3, "properly calls read()")
     assert_true(output_file_name.endswith("firefox-nightly_linux64.tar.bz2"), "uses expected file name")
-    assert_true(output_file_name.startswith(tmp_dir), "writes file to expected directory")
+    assert_true(output_file_name.startswith(tests.tmp_dir), "writes file to expected directory")
     assert_true(os.path.isfile(output_file_name), "creates proper file")
     with open(output_file_name, "r") as f:
         content = f.read()
@@ -95,7 +73,7 @@ def test_firefox_downloader_downloading(mock_stdout, mock_urlopen):
     sleep(1.1)
     mock_read.reset_mock()
     mock_read.side_effect = ("foo", "bar", None)
-    fdl = fd.FirefoxDownloader(tmp_dir, cache_timeout=1)
+    fdl = fd.FirefoxDownloader(tests.tmp_dir, cache_timeout=1)
     fdl.download("nightly", "linux", use_cache=True)
     assert_true(mock_read.called, "re-downloads when cache is stale")
 

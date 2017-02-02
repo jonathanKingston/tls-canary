@@ -42,7 +42,7 @@ class FirefoxApp(object):
             matches = glob.glob(os.path.join(directory, base))
             if len(matches) == 0:
                 continue
-            elif len(matches) == 1:
+            elif len(matches) >= 1:
                 if os.path.isdir(matches[0]):
                     self.platform = platform
                     self.app_dir = matches[0]

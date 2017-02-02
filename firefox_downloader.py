@@ -4,6 +4,7 @@
 
 import logging
 import os
+import struct
 import sys
 import time
 import urllib2
@@ -40,6 +41,18 @@ class FirefoxDownloader(object):
         test_default = "nightly"
         base_default = "release"
         return build_list, platform_list, test_default, base_default
+
+    @staticmethod
+    def detect_platform():
+        is_64bit = struct.calcsize('P') * 8 == 64
+        platform = None
+        if sys.platform.startswith("darwin"):
+            platform = "osx"
+        elif sys.platform.startswith("linux"):
+            platform = "linux" if is_64bit else "linux32"
+        elif sys.platform.startswith("win"):
+            sys.platform = "win" if is_64bit else "win32"
+        return platform
 
     def __init__(self, workdir, cache_timeout=24*60*60):
         self.__workdir = workdir
@@ -118,7 +131,10 @@ class FirefoxDownloader(object):
 
         return filename
 
-    def download(self, release, platform, use_cache=True):
+    def download(self, release, platform=None, use_cache=True):
+
+        if platform is None:
+            platform = self.detect_platform()
 
         if release not in self.build_urls:
             raise Exception("Failed to download unknown release `%s`" % release)

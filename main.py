@@ -20,9 +20,9 @@ import time
 import cleanup
 import firefox_downloader as fd
 import firefox_extractor as fe
-import xpcshell_worker as fr
 import progress_bar
 import url_store as us
+import worker_pool as wp
 
 
 # Initialize coloredlogs
@@ -196,7 +196,12 @@ def run_test(app, url_list, work_dir, module_dir, num_workers, info=False, cert_
 
     number_of_urls = len(url_list)
     urls_done = 0
-    runner = fr.FirefoxRunner(app, url_list, work_dir, module_dir, num_workers, info, cert_dir)
+
+    results = wp.run_scans(app, url_list, num_workers=num_workers)
+
+    from IPython import embed
+    embed()
+
     run_errors = set()
 
     if progress:
